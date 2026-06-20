@@ -1,0 +1,16 @@
+# 本地敏感配置（不同部署环境配置不同）
+config.local.php
+
+# 操作系统文件
+.DS_Store
+Thumbs.db
+node_modules/
+
+# IDE配置
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 日志
+*.log
