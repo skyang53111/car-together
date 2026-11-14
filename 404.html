@@ -1,14 +1,38 @@
 <!DOCTYPE html>
-<html>
+<html lang="zh-CN">
 <head>
-    <meta charset="utf-8">
-    <title>404 - 页面未找到</title>
-    <style>body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif;background:#f7f8fa;text-align:center;padding:80px 20px;color:#374151}h1{font-size:48px;color:#4F46E5;margin-bottom:16px}p{font-size:16px;color:#6B7280;margin-bottom:24px}a{color:#4F46E5;text-decoration:none;font-weight:600}a:hover{color:#3730A3}.emoji{font-size:64px;margin-bottom:16px}</style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>页面不存在 - 校区拼车</title>
+<link rel="stylesheet" href="/assets/css/glass.css">
+<style>
+  /* 404 页没有 header.php，图标与布局在这里就地定义 */
+  .err-wrap{min-height:100dvh;display:grid;place-items:center;padding:24px}
+  .err-card{max-width:380px;width:100%;text-align:center;padding:32px 24px}
+  .err-code{
+    font-size:56px;font-weight:800;line-height:1;letter-spacing:-.03em;
+    background:linear-gradient(160deg,var(--brand),var(--brand-700));
+    -webkit-background-clip:text;background-clip:text;color:transparent;
+  }
+  .err-wrap .btn{text-decoration:none}
+</style>
 </head>
 <body>
-    <div class="emoji">🚗💨</div>
-    <h1>404</h1>
-    <p>你访问的页面不存在或已被移除</p>
-    <a href="/index.php">← 返回首页</a>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-search" viewBox="0 0 24 24"><path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/></symbol>
+</svg>
+
+<main class="err-wrap">
+  <div class="glass err-card">
+    <div class="err-code">404</div>
+    <p style="font-size:16px;font-weight:600;margin-top:12px;">页面不存在</p>
+    <p style="font-size:13.5px;color:var(--ink-500);margin-top:6px;line-height:1.7;">
+      你访问的页面可能已被移除，或者地址有误
+    </p>
+    <a href="/index.php" class="btn btn-primary btn-block" style="margin-top:20px;">
+      <svg class="ico"><use href="#i-search"/></svg>返回首页
+    </a>
+  </div>
+</main>
 </body>
 </html>

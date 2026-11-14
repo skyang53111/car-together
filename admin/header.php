@@ -1,17 +1,22 @@
 <?php
 /**
  * 校区拼车平台 - 后台公共头部
+ * 用法：在每个管理页面顶部 include
+ *   $adminActivePage = 'index'; // index | users | rides | bookings | config
  */
 if (!isset($pdo)) require_once __DIR__ . '/../config.php';
 requireAdmin();
 
 $adminActivePage = $adminActivePage ?? basename($_SERVER['SCRIPT_NAME'], '.php');
 
+// 通知统计（侧边栏角标用）
 $_adminUnreadNotif = 0;
 try {
+    // 管理员看全站未读通知总数（简化：只看自己的）
     $_adminUnreadNotif = getUnreadNotificationCount($_SESSION['user_id']);
 } catch (Exception $e) {}
 
+// 待处理事项数
 $_adminPending = [];
 try {
     $_adminPending['expired_rides'] = (int)$pdo->query(
@@ -44,7 +49,7 @@ $_adminPendingTotal = array_sum($_adminPending);
                 <?php endif; ?>
             </a>
             <a href="users.php" class="<?php echo $adminActivePage === 'users' ? 'active' : ''; ?>">👥 用户管理</a>
-            <a href="rides.php" class="<?php echo $adminActivePage === 'rides' ? 'active' : ''; ?>">🚗 拼车管理</a>
+            <a href="rides.php" class="<?php echo $adminActivePage === 'rides' ? 'active' : ''; ?>">🚗 行程管理</a>
             <a href="bookings.php" class="<?php echo $adminActivePage === 'bookings' ? 'active' : ''; ?>">📌 预订管理</a>
             <a href="config.php" class="<?php echo $adminActivePage === 'config' ? 'active' : ''; ?>">🔧 系统配置</a>
         </div>

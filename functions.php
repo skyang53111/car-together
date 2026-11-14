@@ -54,7 +54,7 @@ function requireAdmin(): void {
 function getCurrentUser(): ?array {
     if (!isLoggedIn()) return null;
     global $pdo;
-    $stmt = $pdo->prepare("SELECT id, phone, email, nickname, gender, campus, role, phone_verified, email_verified, created_at FROM users WHERE id = ?");
+    $stmt = $pdo->prepare("SELECT id, phone, email, nickname, avatar, gender, campus, role, phone_verified, email_verified, created_at FROM users WHERE id = ?");
     $stmt->execute([$_SESSION['user_id']]);
     return $stmt->fetch() ?: null;
 }
@@ -101,12 +101,12 @@ function userDisplayName(array $user): string {
 // ==================== 辅助 ====================
 
 /**
- * 自动将已过期的拼车标记为 completed
+ * 自动将已过期的行程标记为 completed
  * 应在每次页面加载时调用（轻量级操作）
  */
 function autoCompleteRides(): void {
     global $pdo;
-    // 出发时间超过2小时的仍为 active 的拼车 → 标记为 completed
+    // 出发时间超过2小时的仍为 active 的行程 → 标记为 completed
     $pdo->exec("UPDATE rides SET status='completed' WHERE status='active' AND ride_time < DATE_SUB(NOW(), INTERVAL 2 HOUR)");
     // 对应预订也标记为 completed
     $pdo->exec("UPDATE bookings b JOIN rides r ON b.ride_id=r.id SET b.status='completed' WHERE b.status='confirmed' AND r.status='completed'");
@@ -262,6 +262,7 @@ function verifyCsrf(string $token): bool {
 
 function getClientIP(): string {
     // 仅在可信代理后使用 X-Forwarded-For
+    // 如果定义了 TRUSTED_PROXY_IP，只信任该代理传递的 XFF
     if (defined('TRUSTED_PROXY_IP') && !empty(TRUSTED_PROXY_IP)) {
         $remoteAddr = $_SERVER['REMOTE_ADDR'] ?? '';
         $trustedIps = is_array(TRUSTED_PROXY_IP) ? TRUSTED_PROXY_IP : [TRUSTED_PROXY_IP];
@@ -353,9 +354,59 @@ function siteConfig(string $key, string $default = ''): string {
     return $cache[$key] ?? $default;
 }
 
+/**
+ * 首页公告：读取后台配置，并判断本次访问是否该弹窗。
+ *
+ * 频率（后台可选）：
+ *   always — 每次打开首页都弹
+ *   daily  — 每个用户每天弹一次
+ *   once   — 每个用户只弹一次（公告内容改动后会重新弹）
+ *
+ * 判定用 cookie `carpool_ann` 存一个「看过」令牌；令牌就是内容指纹（daily 再加日期），
+ * 所以管理员改了公告 → 指纹变 → 看过的用户会重新收到新公告。
+ * 未登录用户也能正确判定（不依赖 users 表）。
+ *
+ * @return array{title:string,body_html:string,token:string,maxage:int}|null null = 本次不弹
+ */
+function getAnnouncement(): ?array {
+    if (siteConfig('announcement_enabled', '0') !== '1') return null;
+
+    $title = trim(siteConfig('announcement_title', ''));
+    $body  = trim(siteConfig('announcement_body', ''));
+    if ($title === '' && $body === '') return null;   // 没写内容就不弹
+
+    // 正文渲染：写成纯文本就转义并把换行变成 <br>；写成 HTML 就原样输出（内容只有管理员能编辑）
+    $isHtml   = (bool)preg_match('/<[a-zA-Z][a-zA-Z0-9]*(\s[^>]*)?>/', $body);
+    $bodyHtml = $isHtml ? $body : nl2br(h($body));
+
+    $freq = siteConfig('announcement_frequency', 'once');
+
+    // 每次都弹：不给令牌，前端也不写 cookie
+    if ($freq === 'always') {
+        return ['title' => $title, 'body_html' => $bodyHtml, 'token' => '', 'maxage' => 0];
+    }
+
+    // 内容指纹：标题或正文一改，令牌就变，看过的用户会重新收到
+    $fp = substr(md5($title . "\x1f" . $body), 0, 12);
+
+    if ($freq === 'daily') {
+        $token  = $fp . '.' . date('Y-m-d');
+        $maxage = 86400;        // 1 天
+    } else {                    // once
+        $token  = $fp;
+        $maxage = 31536000;     // 1 年
+    }
+
+    if ((string)($_COOKIE['carpool_ann'] ?? '') === $token) return null;  // 已经看过了
+
+    return ['title' => $title, 'body_html' => $bodyHtml, 'token' => $token, 'maxage' => $maxage];
+}
+
 // ==================== 邮件配置与发送 ====================
 
 function getMailConfig(): array {
+    // SMTP 配置直接使用 config.local.php 中定义的常量，不再从数据库读取
+    // （数据库中的旧 SMTP 记录可能导致与实际邮箱账号不匹配）
     $username  = defined('MAIL_USERNAME') ? MAIL_USERNAME : '';
     $password  = defined('MAIL_PASSWORD') ? MAIL_PASSWORD : '';
 
@@ -371,6 +422,11 @@ function getMailConfig(): array {
 }
 
 function sendMail(string $to, string $subject, string $htmlBody): bool {
+    if (empty($to)) {
+        error_log("sendMail: empty recipient, subject=$subject");
+        return false;
+    }
+
     $cfg = getMailConfig();
     $host     = $cfg['host'];
     $port     = $cfg['port'];
@@ -484,7 +540,6 @@ function sendResetPasswordEmail(string $to, string $code): bool {
         . '<p style="font-size:14px;color:#888;">如非本人操作，请忽略此邮件。</p>';
     return sendMail($to, $subject, renderEmailHtml('重置密码', $content, '', '', 'danger'));
 }
-
 // ==================== 邮件通知功能 ====================
 
 /**
@@ -519,20 +574,24 @@ function isEmailNotificationEnabled(): bool {
 }
 
 /**
- * 获取拼车信息和所有相关用户（用于通知）
+ * 获取行程信息和所有相关用户（用于通知）
+ * @return array|null ['ride' => [...], 'owner' => [...], 'passengers' => [[...], ...]]
  */
 function getRideNotifyData(int $rideId): ?array {
     global $pdo;
 
+    // 获取行程信息
     $stmt = $pdo->prepare("SELECT * FROM rides WHERE id = ?");
     $stmt->execute([$rideId]);
     $ride = $stmt->fetch();
     if (!$ride) return null;
 
+    // 获取发布者
     $stmt = $pdo->prepare("SELECT id, email, nickname FROM users WHERE id = ?");
     $stmt->execute([$ride['user_id']]);
     $owner = $stmt->fetch();
 
+    // 获取所有已确认的乘客
     $stmt = $pdo->prepare(
         "SELECT u.id, u.email, u.nickname
          FROM bookings b
@@ -563,6 +622,7 @@ function notifyOnBooking(int $rideId, int $passengerId): void {
     $rideTime = date('Y-m-d H:i', strtotime($ride['ride_time']));
     $siteUrl = SITE_URL;
 
+    // 获取乘客信息
     global $pdo;
     $stmt = $pdo->prepare("SELECT id, email, nickname FROM users WHERE id = ?");
     $stmt->execute([$passengerId]);
@@ -571,33 +631,37 @@ function notifyOnBooking(int $rideId, int $passengerId): void {
     $passengerName = h($passenger['nickname'] ?: explode('@', $passenger['email'])[0]);
     $ownerName = h($owner['nickname'] ?: explode('@', $owner['email'])[0]);
 
-    $subject1 = "【" . SITE_NAME . "】拼车预订成功";
-    $content1 = '<p style="font-size:16px;color:#333;">' . $passengerName . '，您好！</p>'
-        . '<p style="font-size:16px;color:#333;">您已成功预订以下拼车：</p>'
-        . '<table style="width:100%;border-collapse:collapse;margin:16px 0;">'
-        . '<tr><td style="padding:8px 12px;background:#F9FAFB;color:#6B7280;width:80px;">出发地</td><td style="padding:8px 12px;color:#333;"><strong>' . h($ride['origin']) . '</strong></td></tr>'
-        . '<tr><td style="padding:8px 12px;background:#F9FAFB;color:#6B7280;">目的地</td><td style="padding:8px 12px;color:#333;"><strong>' . h($ride['destination']) . '</strong></td></tr>'
-        . '<tr><td style="padding:8px 12px;background:#F9FAFB;color:#6B7280;">出发时间</td><td style="padding:8px 12px;color:#333;"><strong>' . $rideTime . '</strong></td></tr>'
-        . '<tr><td style="padding:8px 12px;background:#F9FAFB;color:#6B7280;">发布者</td><td style="padding:8px 12px;color:#333;">' . $ownerName . '</td></tr>'
-        . '</table>'
-        . '<p style="font-size:14px;color:#888;">登录平台进入「我的预订」查看发布者联系方式。</p>';
-    sendMail($passenger['email'], $subject1, renderEmailHtml('预订成功', $content1, $siteUrl . '/my_bookings.php', '查看我的预订', 'success'));
-    createNotification($passengerId, 'booking_success', $subject1, "预订成功", '/my_bookings.php');
+    // 通知乘客：预订成功
+    if (!empty($passenger['email'])) {
+        $subject1 = "【" . SITE_NAME . "】行程预订成功";
+        $content1 = '<p style="font-size:16px;color:#333;">' . $passengerName . '，您好！</p>'
+            . '<p style="font-size:16px;color:#333;">您已成功预订以下行程：</p>'
+            . '<table style="width:100%;border-collapse:collapse;margin:16px 0;">'
+            . '<tr><td style="padding:8px 12px;background:#F9FAFB;color:#6B7280;width:80px;">出发地</td><td style="padding:8px 12px;color:#333;"><strong>' . h($ride['origin']) . '</strong></td></tr>'
+            . '<tr><td style="padding:8px 12px;background:#F9FAFB;color:#6B7280;">目的地</td><td style="padding:8px 12px;color:#333;"><strong>' . h($ride['destination']) . '</strong></td></tr>'
+            . '<tr><td style="padding:8px 12px;background:#F9FAFB;color:#6B7280;">出发时间</td><td style="padding:8px 12px;color:#333;"><strong>' . $rideTime . '</strong></td></tr>'
+            . '<tr><td style="padding:8px 12px;background:#F9FAFB;color:#6B7280;">发布者</td><td style="padding:8px 12px;color:#333;">' . $ownerName . '</td></tr>'
+            . '</table>'
+            . '<p style="font-size:14px;color:#888;">登录平台进入「我的预订」查看发布者联系方式。</p>';
+        sendMail($passenger['email'], $subject1, renderEmailHtml('预订成功', $content1, $siteUrl . '/my_bookings.php', '查看我的预订', 'success'));
+        createNotification($passengerId, 'booking_success', $subject1, "预订成功", '/my_bookings.php');
+    }
 
-    $subject2 = "【" . SITE_NAME . "】有人预订了您的拼车";
+    // 通知发布者：有人预订了
+    $subject2 = "【" . SITE_NAME . "】有人预订了您的行程";
     $content2 = '<p style="font-size:16px;color:#333;">' . $ownerName . '，您好！</p>'
-        . '<p style="font-size:16px;color:#333;">' . $passengerName . ' 预订了您的拼车：</p>'
+        . '<p style="font-size:16px;color:#333;">' . $passengerName . ' 预订了您的行程：</p>'
         . '<table style="width:100%;border-collapse:collapse;margin:16px 0;">'
         . '<tr><td style="padding:8px 12px;background:#F9FAFB;color:#6B7280;width:80px;">路线</td><td style="padding:8px 12px;color:#333;"><strong>' . h($ride['origin']) . ' → ' . h($ride['destination']) . '</strong></td></tr>'
         . '<tr><td style="padding:8px 12px;background:#F9FAFB;color:#6B7280;">出发时间</td><td style="padding:8px 12px;color:#333;"><strong>' . $rideTime . '</strong></td></tr>'
         . '<tr><td style="padding:8px 12px;background:#F9FAFB;color:#6B7280;">剩余座位</td><td style="padding:8px 12px;color:#333;"><strong>' . $ride['available_seats'] . '</strong> / ' . $ride['capacity'] . '</td></tr>'
         . '</table>';
     sendMail($owner['email'], $subject2, renderEmailHtml('新的预订', $content2, $siteUrl . '/my_rides.php', '查看我的发布'));
-    createNotification($ride['user_id'], 'new_booking', $subject2, $passengerName . " 预订了您的拼车", '/my_rides.php');
+    createNotification($ride['user_id'], 'new_booking', $subject2, $passengerName . " 预订了您的行程", '/my_rides.php');
 }
 
 /**
- * 拼车满员通知 —— 通知发布者和所有乘客
+ * 行程已满通知 —— 通知发布者和所有乘客
  */
 function notifyOnCarpoolFull(int $rideId): void {
     if (!isEmailNotificationEnabled()) return;
@@ -611,30 +675,33 @@ function notifyOnCarpoolFull(int $rideId): void {
     $siteUrl = SITE_URL;
     $ownerName = h($owner['nickname'] ?: explode('@', $owner['email'])[0]);
 
-    $subject1 = "【" . SITE_NAME . "】拼车已满员";
+    // 通知发布者
+    $subject1 = "【" . SITE_NAME . "】行程已满";
     $content1 = '<p style="font-size:16px;color:#333;">' . $ownerName . '，您好！</p>'
-        . '<p style="font-size:16px;color:#333;">您发布的拼车已满员（' . $ride['capacity'] . '/' . $ride['capacity'] . '座）：</p>'
+        . '<p style="font-size:16px;color:#333;">您发布的行程已满（' . $ride['capacity'] . '/' . $ride['capacity'] . '座）：</p>'
         . '<table style="width:100%;border-collapse:collapse;margin:16px 0;">'
         . '<tr><td style="padding:8px 12px;background:#F9FAFB;color:#6B7280;width:80px;">路线</td><td style="padding:8px 12px;color:#333;"><strong>' . h($ride['origin']) . ' → ' . h($ride['destination']) . '</strong></td></tr>'
         . '<tr><td style="padding:8px 12px;background:#F9FAFB;color:#6B7280;">出发时间</td><td style="padding:8px 12px;color:#333;"><strong>' . $rideTime . '</strong></td></tr>'
         . '</table>'
         . '<p style="font-size:14px;color:#888;">请及时与乘客确认行程安排。</p>';
-    sendMail($owner['email'], $subject1, renderEmailHtml('拼车已满员', $content1, $siteUrl . '/my_rides.php', '查看详情', 'warning'));
-    createNotification($ride['user_id'], 'carpool_full', $subject1, "您的拼车已满员", '/my_rides.php');
+    sendMail($owner['email'], $subject1, renderEmailHtml('行程已满', $content1, $siteUrl . '/my_rides.php', '查看详情', 'warning'));
+    createNotification($ride['user_id'], 'carpool_full', $subject1, "您的行程已满", '/my_rides.php');
 
+    // 通知所有乘客
     foreach ($data['passengers'] as $p) {
+        if (empty($p['email'])) continue;
         $passengerName = h($p['nickname'] ?: explode('@', $p['email'])[0]);
-        $subject2 = "【" . SITE_NAME . "】拼车已满员，请确认行程";
+        $subject2 = "【" . SITE_NAME . "】行程已满，请确认安排";
         $content2 = '<p style="font-size:16px;color:#333;">' . $passengerName . '，您好！</p>'
-            . '<p style="font-size:16px;color:#333;">您预订的拼车已满员：</p>'
+            . '<p style="font-size:16px;color:#333;">您预订的行程已满：</p>'
             . '<table style="width:100%;border-collapse:collapse;margin:16px 0;">'
             . '<tr><td style="padding:8px 12px;background:#F9FAFB;color:#6B7280;width:80px;">路线</td><td style="padding:8px 12px;color:#333;"><strong>' . h($ride['origin']) . ' → ' . h($ride['destination']) . '</strong></td></tr>'
             . '<tr><td style="padding:8px 12px;background:#F9FAFB;color:#6B7280;">出发时间</td><td style="padding:8px 12px;color:#333;"><strong>' . $rideTime . '</strong></td></tr>'
             . '<tr><td style="padding:8px 12px;background:#F9FAFB;color:#6B7280;">发布者</td><td style="padding:8px 12px;color:#333;">' . $ownerName . '</td></tr>'
             . '</table>'
-            . '<p style="font-size:14px;color:#888;">拼车已满员，请与发布者确认行程安排。</p>';
-        sendMail($p['email'], $subject2, renderEmailHtml('拼车已满员', $content2, $siteUrl . '/my_bookings.php', '查看我的预订', 'warning'));
-        createNotification($p['id'], 'carpool_full', $subject2, "拼车已满员，请确认行程", '/my_bookings.php');
+            . '<p style="font-size:14px;color:#888;">行程已满，请与发布者确认行程安排。</p>';
+        sendMail($p['email'], $subject2, renderEmailHtml('行程已满', $content2, $siteUrl . '/my_bookings.php', '查看我的预订', 'warning'));
+        createNotification($p['id'], 'carpool_full', $subject2, "行程已满，请确认安排", '/my_bookings.php');
     }
 }
 
@@ -653,6 +720,7 @@ function notifyOnCancelBooking(int $rideId, int $passengerId): void {
     $siteUrl = SITE_URL;
     $ownerName = h($owner['nickname'] ?: explode('@', $owner['email'])[0]);
 
+    // 获取乘客信息
     global $pdo;
     $stmt = $pdo->prepare("SELECT id, email, nickname FROM users WHERE id = ?");
     $stmt->execute([$passengerId]);
@@ -660,20 +728,24 @@ function notifyOnCancelBooking(int $rideId, int $passengerId): void {
     if (!$passenger) return;
     $passengerName = h($passenger['nickname'] ?: explode('@', $passenger['email'])[0]);
 
-    $subject1 = "【" . SITE_NAME . "】预订已取消";
-    $content1 = '<p style="font-size:16px;color:#333;">' . $passengerName . '，您好！</p>'
-        . '<p style="font-size:16px;color:#333;">您已取消以下拼车预订：</p>'
-        . '<table style="width:100%;border-collapse:collapse;margin:16px 0;">'
-        . '<tr><td style="padding:8px 12px;background:#F9FAFB;color:#6B7280;width:80px;">路线</td><td style="padding:8px 12px;color:#333;"><strong>' . h($ride['origin']) . ' → ' . h($ride['destination']) . '</strong></td></tr>'
-        . '<tr><td style="padding:8px 12px;background:#F9FAFB;color:#6B7280;">出发时间</td><td style="padding:8px 12px;color:#333;"><strong>' . $rideTime . '</strong></td></tr>'
-        . '</table>'
-        . '<p style="font-size:14px;color:#888;">如有需要，您可以重新预订其他拼车。</p>';
-    sendMail($passenger['email'], $subject1, renderEmailHtml('预订已取消', $content1, $siteUrl . '/index.php', '查看拼车列表', 'cancel'));
-    createNotification($passengerId, 'cancel_booking', $subject1, "已取消预订", '/index.php');
+    // 通知乘客：取消成功
+    if (!empty($passenger['email'])) {
+        $subject1 = "【" . SITE_NAME . "】预订已取消";
+        $content1 = '<p style="font-size:16px;color:#333;">' . $passengerName . '，您好！</p>'
+            . '<p style="font-size:16px;color:#333;">您已取消以下行程预订：</p>'
+            . '<table style="width:100%;border-collapse:collapse;margin:16px 0;">'
+            . '<tr><td style="padding:8px 12px;background:#F9FAFB;color:#6B7280;width:80px;">路线</td><td style="padding:8px 12px;color:#333;"><strong>' . h($ride['origin']) . ' → ' . h($ride['destination']) . '</strong></td></tr>'
+            . '<tr><td style="padding:8px 12px;background:#F9FAFB;color:#6B7280;">出发时间</td><td style="padding:8px 12px;color:#333;"><strong>' . $rideTime . '</strong></td></tr>'
+            . '</table>'
+            . '<p style="font-size:14px;color:#888;">如有需要，您可以重新预订其他行程。</p>';
+        sendMail($passenger['email'], $subject1, renderEmailHtml('预订已取消', $content1, $siteUrl . '/index.php', '查看行程列表', 'cancel'));
+        createNotification($passengerId, 'cancel_booking', $subject1, "已取消预订", '/index.php');
+    }
 
+    // 通知发布者
     $subject2 = "【" . SITE_NAME . "】有人取消了预订";
     $content2 = '<p style="font-size:16px;color:#333;">' . $ownerName . '，您好！</p>'
-        . '<p style="font-size:16px;color:#333;">' . $passengerName . ' 已取消对您拼车的预订：</p>'
+        . '<p style="font-size:16px;color:#333;">' . $passengerName . ' 已取消对您行程的预订：</p>'
         . '<table style="width:100%;border-collapse:collapse;margin:16px 0;">'
         . '<tr><td style="padding:8px 12px;background:#F9FAFB;color:#6B7280;width:80px;">路线</td><td style="padding:8px 12px;color:#333;"><strong>' . h($ride['origin']) . ' → ' . h($ride['destination']) . '</strong></td></tr>'
         . '<tr><td style="padding:8px 12px;background:#F9FAFB;color:#6B7280;">出发时间</td><td style="padding:8px 12px;color:#333;"><strong>' . $rideTime . '</strong></td></tr>'
@@ -684,7 +756,7 @@ function notifyOnCancelBooking(int $rideId, int $passengerId): void {
 }
 
 /**
- * 拼车取消通知 —— 通知所有已确认乘客
+ * 行程取消通知 —— 通知所有已确认乘客
  */
 function notifyOnRideCancel(int $rideId): void {
     if (!isEmailNotificationEnabled()) return;
@@ -698,28 +770,33 @@ function notifyOnRideCancel(int $rideId): void {
     $siteUrl = SITE_URL;
     $ownerName = h($owner['nickname'] ?: explode('@', $owner['email'])[0]);
 
-    $subject1 = "【" . SITE_NAME . "】您的拼车已取消";
+    // 通知发布者：行程已取消
+    $subject1 = "【" . SITE_NAME . "】您的行程已取消";
     $content1 = '<p style="font-size:16px;color:#333;">' . $ownerName . '，您好！</p>'
-        . '<p style="font-size:16px;color:#333;">您已成功取消以下拼车：</p>'
+        . '<p style="font-size:16px;color:#333;">您已成功取消以下行程：</p>'
         . '<table style="width:100%;border-collapse:collapse;margin:16px 0;">'
         . '<tr><td style="padding:8px 12px;background:#F9FAFB;color:#6B7280;width:80px;">路线</td><td style="padding:8px 12px;color:#333;"><strong>' . h($ride['origin']) . ' → ' . h($ride['destination']) . '</strong></td></tr>'
         . '<tr><td style="padding:8px 12px;background:#F9FAFB;color:#6B7280;">出发时间</td><td style="padding:8px 12px;color:#333;"><strong>' . $rideTime . '</strong></td></tr>'
         . '</table>'
-        . '<p style="font-size:14px;color:#888;">系统已通知所有预订此拼车的用户。</p>';
-    sendMail($owner['email'], $subject1, renderEmailHtml('拼车已取消', $content1, $siteUrl . '/post_ride.php', '重新发布', 'danger'));
+        . '<p style="font-size:14px;color:#888;">系统已通知所有预订此行程的用户。</p>';
+    sendMail($owner['email'], $subject1, renderEmailHtml('行程已取消', $content1, $siteUrl . '/post_ride.php', '重新发布', 'danger'));
 
+    // 通知所有乘客
     foreach ($data['passengers'] as $p) {
+        // 跳过没有邮箱的乘客
+        if (empty($p['email'])) continue;
+
         $passengerName = h($p['nickname'] ?: explode('@', $p['email'])[0]);
-        $subject2 = "【" . SITE_NAME . "】您预订的拼车已被取消";
+        $subject2 = "【" . SITE_NAME . "】您预订的行程已被取消";
         $content2 = '<p style="font-size:16px;color:#333;">' . $passengerName . '，您好！</p>'
-            . '<p style="font-size:16px;color:#333;">很遗憾，发布者 ' . $ownerName . ' 已取消以下拼车：</p>'
+            . '<p style="font-size:16px;color:#333;">很遗憾，发布者 ' . $ownerName . ' 已取消以下行程：</p>'
             . '<table style="width:100%;border-collapse:collapse;margin:16px 0;">'
             . '<tr><td style="padding:8px 12px;background:#F9FAFB;color:#6B7280;width:80px;">路线</td><td style="padding:8px 12px;color:#333;"><strong>' . h($ride['origin']) . ' → ' . h($ride['destination']) . '</strong></td></tr>'
             . '<tr><td style="padding:8px 12px;background:#F9FAFB;color:#6B7280;">出发时间</td><td style="padding:8px 12px;color:#333;"><strong>' . $rideTime . '</strong></td></tr>'
             . '</table>'
-            . '<p style="font-size:14px;color:#888;">您可前往平台查看其他拼车信息。</p>';
-        sendMail($p['email'], $subject2, renderEmailHtml('拼车已取消', $content2, $siteUrl . '/index.php', '查看拼车列表', 'danger'));
-        createNotification($p['id'], 'ride_cancel', $subject2, "发布者已取消拼车", '/index.php');
+            . '<p style="font-size:14px;color:#888;">您可前往平台查看其他行程信息。</p>';
+        sendMail($p['email'], $subject2, renderEmailHtml('行程已取消', $content2, $siteUrl . '/index.php', '查看行程列表', 'danger'));
+        createNotification($p['id'], 'ride_cancel', $subject2, "发布者已取消行程", '/index.php');
     }
 }
 
@@ -735,16 +812,16 @@ function getPageTitle(): string {
 
 function getCampuses(): array {
     $campuses = json_decode(CAMPUSES, true);
-    return is_array($campuses) ? $campuses : ['南校区', '北校区', '月亮岛校区'];
+    return is_array($campuses) ? $campuses : ['南校区', '北校区', '东校区'];
 }
 
 function getHotDestinations(): array {
     return [
-        '南校区西门', '南校区北门', '南校区东门',
+        '南校区南门', '南校区北门', '南校区东门',
         '北校区西门', '北校区南门', '北校区东门',
-        '月亮岛校区正门', '月亮岛校区侧门',
+        '东校区正门', '东校区侧门',
         '市中心', '火车站', '高铁站', '机场',
-        '万达广场', '大学城', '地铁站'
+        '商业广场', '大学城', '地铁站'
     ];
 }
 

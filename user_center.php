@@ -1,237 +1,403 @@
 <?php
 /**
- * 校区拼车平台 - 个人中心
+ * 校区拼车平台 - 个人中心（看板）
+ *
+ * 结构：身份顶卡 → 缺资料提示 → 分段内容（即将出行 / 我的发布 / 消息）
+ * 资料与账号设置（基本资料、账号与安全、帮助与反馈、注销）在 profile.php。
  */
 require_once __DIR__ . '/config.php';
 requireLogin();
 setPageTitle('个人中心');
 
 $user = getCurrentUser();
-if (!$user) {
-    header('Location: /logout.php');
+
+/** JSON 响应（通知 AJAX 用） */
+function ucJsonResponse(bool $success, string $message): void {
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode(['success' => $success, 'message' => $message], JSON_UNESCAPED_UNICODE);
     exit;
 }
 
-$error = '';
-$success = '';
-
-// 处理表单提交
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $action = input('action');
-
-    if ($action === 'update_profile') {
-        if (!verifyCsrf(input('csrf_token'))) {
-            $error = '表单已过期，请刷新重试';
-        } else {
-            $nickname = input('nickname');
-            $gender   = input('gender');
-            $campus   = input('campus');
-
-            $stmt = $pdo->prepare("UPDATE users SET nickname = ?, gender = ?, campus = ? WHERE id = ?");
-            $stmt->execute([
-                $nickname ?: null,
-                $gender ?: null,
-                $campus ?: null,
-                $user['id']
-            ]);
-            $success = '个人资料已更新';
-            $user['nickname'] = $nickname;
-            $user['gender'] = $gender;
-            $user['campus'] = $campus;
-        }
-    } elseif ($action === 'change_password') {
-        if (!verifyCsrf(input('csrf_token'))) {
-            $error = '表单已过期';
-        } else {
-            $oldPwd = input('old_password');
-            $newPwd = input('new_password');
-            $confirmPwd = input('confirm_password');
-
-            $stmt = $pdo->prepare("SELECT password_hash FROM users WHERE id = ?");
-            $stmt->execute([$user['id']]);
-            $row = $stmt->fetch();
-
-            if (!password_verify($oldPwd, $row['password_hash'])) {
-                $error = '原密码错误';
-            } elseif (strlen($newPwd) < 8) {
-                $error = '新密码至少需要8位';
-            } elseif ($newPwd !== $confirmPwd) {
-                $error = '两次输入的密码不一致';
-            } else {
-                $hash = password_hash($newPwd, PASSWORD_BCRYPT, ['cost' => BCRYPT_COST]);
-                $pdo->prepare("UPDATE users SET password_hash = ? WHERE id = ?")->execute([$hash, $user['id']]);
-                $success = '密码已修改';
-            }
-        }
-    }
+/** 距出发还有多久（给「下一次出行」用） */
+function ucCountdown(string $rideTime): string {
+    $diff = strtotime($rideTime) - time();
+    if ($diff <= 0) return '';
+    $days = (int)floor($diff / 86400);
+    if ($days >= 1) return $days . ' 天后';
+    $hours = (int)floor($diff / 3600);
+    if ($hours >= 1) return $hours . ' 小时后';
+    return max(1, (int)floor($diff / 60)) . ' 分钟后';
 }
 
-// 统计数据
+// ========== 通知操作（AJAX） ==========
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && input('action') === 'read_notif') {
+    if (verifyCsrf(input('csrf_token'))) {
+        markNotificationRead((int)input('id'), $user['id']);
+    }
+    exit;
+}
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && input('action') === 'read_all_notif') {
+    if (verifyCsrf(input('csrf_token'))) {
+        markAllNotificationsRead($user['id']);
+    }
+    ucJsonResponse(true, '已全部标记为已读');
+}
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && input('action') === 'delete_notif') {
+    if (verifyCsrf(input('csrf_token'))) {
+        deleteNotification((int)input('id'), $user['id']);
+    }
+    ucJsonResponse(true, '已删除');
+}
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && input('action') === 'delete_read_notif') {
+    if (verifyCsrf(input('csrf_token'))) {
+        deleteAllReadNotifications($user['id']);
+    }
+    ucJsonResponse(true, '已清理所有已读通知');
+}
+
+// ========== 数据准备 ==========
+$displayName = userDisplayName($user);
+$regDays = max(1, (int)floor((time() - strtotime($user['created_at'])) / 86400));
+
+// 当前分段（?tab=），默认「即将出行」
+$tab = input('tab', 'get');
+if (!in_array($tab, ['trips', 'rides', 'msg'], true)) { $tab = 'trips'; }
+$notifTypeFilter = input('ntype', 'get');
+
+// 统计
 $stmt = $pdo->prepare("SELECT COUNT(*) FROM rides WHERE user_id = ?");
 $stmt->execute([$user['id']]);
-$rideCount = $stmt->fetchColumn();
-
-$stmt = $pdo->prepare("SELECT COUNT(*) FROM bookings WHERE user_id = ?");
+$myRidesCount = (int)$stmt->fetchColumn();
+$stmt = $pdo->prepare("SELECT COUNT(*) FROM rides WHERE user_id = ? AND status = 'active'");
 $stmt->execute([$user['id']]);
-$bookingCount = $stmt->fetchColumn();
+$myActiveRides = (int)$stmt->fetchColumn();
+$stmt = $pdo->prepare("SELECT COUNT(*) FROM rides WHERE user_id = ? AND status = 'completed'");
+$stmt->execute([$user['id']]);
+$myCompletedRides = (int)$stmt->fetchColumn();
+$stmt = $pdo->prepare("SELECT COUNT(*) FROM bookings WHERE user_id = ? AND status = 'confirmed'");
+$stmt->execute([$user['id']]);
+$myBookingsCount = (int)$stmt->fetchColumn();
 
-$campuses = getCampuses();
+// 安全评分
+$securityScore = 0;
+if ($user['phone'] && $user['phone_verified']) { $securityScore += 30; }
+if ($user['email'] && $user['email_verified']) { $securityScore += 30; }
+if ($user['nickname']) { $securityScore += 10; }
+if ($user['gender'])   { $securityScore += 10; }
+if ($user['campus'])   { $securityScore += 10; }
+$securityScore += 10;                                   // 统一认证已设置
+$securityScore = min(100, $securityScore);
+$scoreClass = $securityScore >= 70 ? 'high' : ($securityScore >= 40 ? 'mid' : 'low');
+
+// 缺资料提示：邮箱优先（才是发通知的通道）；手机号影响发布时自动带出联系方式
+$missingKeys = [];
+$missingWhy  = '';
+if (empty($user['email'])) { $missingKeys[] = '邮箱'; }
+if (empty($user['phone'])) { $missingKeys[] = '手机号'; }
+if (count($missingKeys) === 1) {
+    $missingWhy = $missingKeys[0] === '邮箱' ? '会收不到预订、取消等通知' : '发布行程时无法自动带出联系方式';
+} elseif (count($missingKeys) === 2) {
+    $missingWhy = '邮箱用来收通知，手机号用来在发布时自动带出联系方式';
+}
+
+// 即将出行（已确认、行程仍有效，按时间升序）
+$stmt = $pdo->prepare(
+    "SELECT b.id AS booking_id, r.origin, r.destination, r.ride_time,
+            u.nickname AS owner_name, u.email AS owner_email
+     FROM bookings b
+     JOIN rides r ON b.ride_id = r.id
+     JOIN users u ON r.user_id = u.id
+     WHERE b.user_id = ? AND b.status = 'confirmed' AND r.status = 'active'
+     ORDER BY r.ride_time ASC LIMIT 4"
+);
+$stmt->execute([$user['id']]);
+$upcoming  = $stmt->fetchAll();
+$nextTrip  = $upcoming ? $upcoming[0] : null;
+$restTrips = $upcoming ? array_slice($upcoming, 1) : [];
+
+// 我的最新发布
+$stmt = $pdo->prepare(
+    "SELECT r.id, r.origin, r.destination, r.ride_time, r.capacity, r.available_seats, r.status,
+            (r.capacity - r.available_seats) AS booked_count
+     FROM rides r
+     WHERE r.user_id = ?
+     ORDER BY r.created_at DESC LIMIT 5"
+);
+$stmt->execute([$user['id']]);
+$myRides = $stmt->fetchAll();
+
+// 通知
+$notifications = getNotificationsFiltered($user['id'], $notifTypeFilter, 15);
+$unreadCount   = getUnreadNotificationCount($user['id']);
+
+include __DIR__ . '/header.php';
 ?>
-<?php include __DIR__ . '/header.php'; ?>
 
-<div class="user-center-header">
-    <div class="user-avatar"><?php echo h(mb_substr(userDisplayName($user), 0, 1)); ?></div>
-    <h2 style="font-size:18px;"><?php echo h(userDisplayName($user)); ?></h2>
-    <div class="user-badges">
-        <?php if ($user['phone_verified']): ?>
-        <span class="user-badge user-badge-verified">📱 手机已验证</span>
-        <?php endif; ?>
-        <?php if ($user['email_verified']): ?>
-        <span class="user-badge user-badge-verified">📧 邮箱已验证</span>
-        <?php endif; ?>
+<!-- ===== 身份顶卡 ===== -->
+<section class="uc-idcard">
+    <div class="top">
+        <div class="uc-av">
+            <?php if (!empty($user['avatar'])): ?>
+                <img src="<?php echo h($user['avatar']); ?>" alt="">
+            <?php else: ?>
+                <?php echo h(mb_substr($displayName, 0, 1)); ?>
+            <?php endif; ?>
+        </div>
+        <div class="who">
+            <div class="nm"><?php echo h($displayName); ?></div>
+            <div class="ct">
+                <?php if ($user['phone']): ?>
+                    <svg class="ico"><use href="#i-phone"/></svg><span><?php echo h($user['phone']); ?></span>
+                <?php elseif ($user['email']): ?>
+                    <svg class="ico"><use href="#i-mail"/></svg><span><?php echo h($user['email']); ?></span>
+                <?php else: ?>
+                    <svg class="ico"><use href="#i-mail"/></svg><span>未绑定联系方式</span>
+                <?php endif; ?>
+            </div>
+        </div>
+        <a href="/profile.php" class="btn btn-outline" style="height:34px;padding:0 12px;font-size:13px;flex:none;">
+            <svg class="ico"><use href="#i-settings"/></svg>资料
+        </a>
+    </div>
+
+    <div class="bd">
         <?php if ($user['campus']): ?>
-        <span class="user-badge user-badge-info">🎓 <?php echo h($user['campus']); ?></span>
+        <span class="badge badge-info"><svg class="ico"><use href="#i-pin"/></svg><?php echo h($user['campus']); ?></span>
         <?php endif; ?>
-        <?php if ($user['role'] === 'super_admin'): ?>
-        <span class="user-badge user-badge-warn">👑 超级管理员</span>
-        <?php elseif ($user['role'] === 'admin'): ?>
-        <span class="user-badge user-badge-warn">⚙️ 管理员</span>
+        <span class="badge badge-muted">注册 <?php echo $regDays; ?> 天</span>
+        <?php if ($user['phone_verified']): ?>
+        <span class="badge badge-ok"><svg class="ico"><use href="#i-check"/></svg>手机</span>
+        <?php else: ?>
+        <span class="badge badge-warn">未绑手机</span>
+        <?php endif; ?>
+        <?php if ($user['email'] && $user['email_verified']): ?>
+        <span class="badge badge-ok"><svg class="ico"><use href="#i-check"/></svg>邮箱</span>
+        <?php endif; ?>
+    </div>
+
+    <div class="uc-mstrip">
+        <div class="m pri"><div class="v"><?php echo $myActiveRides; ?></div><div class="l">进行中</div></div>
+        <div class="m"><div class="v"><?php echo $myRidesCount; ?></div><div class="l">发布</div></div>
+        <div class="m"><div class="v"><?php echo $myCompletedRides; ?></div><div class="l">已完成</div></div>
+        <div class="m"><div class="v"><?php echo $myBookingsCount; ?></div><div class="l">预订</div></div>
+    </div>
+
+    <a class="uc-score <?php echo $scoreClass; ?>" href="/profile.php">
+        <svg class="ico"><use href="#i-shield"/></svg>
+        <span class="t">账号安全</span>
+        <span class="bar"><i style="width:<?php echo $securityScore; ?>%"></i></span>
+        <span class="n"><?php echo $securityScore; ?></span>
+        <svg class="ico chev"><use href="#i-chev-r"/></svg>
+    </a>
+</section>
+
+<?php if ($missingKeys): ?>
+<!-- ===== 缺资料提示 =====
+     本机模式下（AUTH_MODE=local）注册即要求手机号 + 邮箱，正常不会缺；
+     真缺了也没有外部认证平台可跳，回资料页看当前绑定情况即可。 -->
+<a class="uc-remind" href="<?php echo AUTH_MODE === 'local' ? '/profile.php' : h(CASDOOR_ACCOUNT_URL); ?>"
+   <?php echo AUTH_MODE === 'local' ? '' : 'target="_blank" rel="noopener"'; ?>>
+    <svg class="ico"><use href="#i-bell"/></svg>
+    <div class="tx">还差 <b><?php echo h(implode('、', $missingKeys)); ?></b> 没填，<?php echo h($missingWhy); ?></div>
+    <span class="go">去查看 ›</span>
+</a>
+<?php endif; ?>
+
+<!-- ===== 分段器 ===== -->
+<div class="uc-seg" id="ucSeg" role="tablist">
+    <button type="button" data-tab="trips" class="<?php echo $tab === 'trips' ? 'is-on' : ''; ?>">
+        即将出行<span class="n"><?php echo count($upcoming); ?></span>
+    </button>
+    <button type="button" data-tab="rides" class="<?php echo $tab === 'rides' ? 'is-on' : ''; ?>">
+        我的发布<span class="n"><?php echo $myRidesCount; ?></span>
+    </button>
+    <button type="button" data-tab="msg" class="<?php echo $tab === 'msg' ? 'is-on' : ''; ?>">
+        消息<span class="n<?php echo $unreadCount > 0 ? ' alert' : ''; ?>"><?php echo $unreadCount > 99 ? '99+' : $unreadCount; ?></span>
+    </button>
+</div>
+
+<!-- ===== 分段 1：即将出行 ===== -->
+<div class="uc-panel<?php echo $tab === 'trips' ? ' is-active' : ''; ?>" data-panel="trips">
+    <?php if ($nextTrip): ?>
+    <div class="uc-trip">
+        <span class="lbl">下一次出行</span>
+        <div class="rt">
+            <div class="route">
+                <span><?php echo h($nextTrip['origin']); ?></span>
+                <svg class="ico"><use href="#i-arrow-r"/></svg>
+                <span><?php echo h($nextTrip['destination']); ?></span>
+            </div>
+            <?php $cd = ucCountdown($nextTrip['ride_time']); if ($cd !== ''): ?>
+            <span class="cd"><?php echo h($cd); ?></span>
+            <?php endif; ?>
+        </div>
+        <div class="meta">
+            <span><svg class="ico"><use href="#i-cal"/></svg><?php echo h(date('m-d H:i', strtotime($nextTrip['ride_time']))); ?></span>
+            <span><svg class="ico"><use href="#i-user"/></svg>发起人 <?php echo h($nextTrip['owner_name'] ?: explode('@', $nextTrip['owner_email'])[0]); ?></span>
+        </div>
+        <div class="acts">
+            <a class="btn btn-primary" href="/my_bookings.php"><svg class="ico"><use href="#i-phone"/></svg>查看联系方式</a>
+        </div>
+    </div>
+    <?php if ($restTrips): ?>
+    <div class="card" style="padding:2px 16px 10px;">
+        <?php foreach ($restTrips as $b): ?>
+        <div class="list-row">
+            <div class="list-row-main">
+                <div class="list-row-title"><?php echo h($b['origin']); ?> → <?php echo h($b['destination']); ?></div>
+                <div class="list-row-meta">
+                    <span><svg class="ico"><use href="#i-clock"/></svg><?php echo h(date('m-d H:i', strtotime($b['ride_time']))); ?></span>
+                    <span><svg class="ico"><use href="#i-user"/></svg><?php echo h($b['owner_name'] ?: explode('@', $b['owner_email'])[0]); ?></span>
+                </div>
+            </div>
+            <span class="badge badge-ok">已确认</span>
+        </div>
+        <?php endforeach; ?>
+    </div>
+    <?php endif; ?>
+    <a class="btn btn-outline btn-block" href="/my_bookings.php" style="margin-top:4px;">查看全部预订</a>
+    <?php else: ?>
+    <div class="card" style="text-align:center;padding:26px 16px;">
+        <svg class="ico" style="width:34px;height:34px;margin:0 auto 10px;color:var(--ink-300);stroke-width:1.6;"><use href="#i-car"/></svg>
+        <p style="font-size:13.5px;color:var(--ink-500);margin:0 0 12px;">还没有即将出行的行程</p>
+        <a class="btn btn-outline" href="/index.php">去首页找车</a>
+    </div>
+    <?php endif; ?>
+</div>
+
+<!-- ===== 分段 2：我的发布 ===== -->
+<div class="uc-panel<?php echo $tab === 'rides' ? ' is-active' : ''; ?>" data-panel="rides">
+    <?php if ($myRides): ?>
+    <div class="card" style="padding:2px 16px 10px;">
+        <?php foreach ($myRides as $mr): ?>
+        <div class="list-row">
+            <div class="list-row-main">
+                <div class="list-row-title"><?php echo h($mr['origin']); ?> → <?php echo h($mr['destination']); ?></div>
+                <div class="list-row-meta">
+                    <span><svg class="ico"><use href="#i-clock"/></svg><?php echo h(date('m-d H:i', strtotime($mr['ride_time']))); ?></span>
+                    <span><svg class="ico"><use href="#i-users"/></svg><?php echo (int)$mr['booked_count']; ?> 人已预订</span>
+                </div>
+            </div>
+            <?php if ($mr['status'] === 'active'): ?>
+            <span class="badge <?php echo $mr['available_seats'] > 0 ? 'badge-ok' : 'badge-warn'; ?>">
+                <?php echo (int)$mr['available_seats']; ?>/<?php echo (int)$mr['capacity']; ?> 座
+            </span>
+            <?php else: ?>
+            <span class="badge badge-muted"><?php echo $mr['status'] === 'cancelled' ? '已取消' : '已完成'; ?></span>
+            <?php endif; ?>
+        </div>
+        <?php endforeach; ?>
+    </div>
+    <a class="btn btn-outline btn-block" href="/my_rides.php" style="margin-top:4px;">查看全部发布</a>
+    <?php else: ?>
+    <div class="card" style="text-align:center;padding:26px 16px;">
+        <svg class="ico" style="width:34px;height:34px;margin:0 auto 10px;color:var(--ink-300);stroke-width:1.6;"><use href="#i-car"/></svg>
+        <p style="font-size:13.5px;color:var(--ink-500);margin:0 0 12px;">还没有发布过行程</p>
+        <a class="btn btn-outline" href="/post_ride.php">去发布行程</a>
+    </div>
+    <?php endif; ?>
+</div>
+
+<!-- ===== 分段 3：消息 ===== -->
+<div class="uc-panel<?php echo $tab === 'msg' ? ' is-active' : ''; ?>" data-panel="msg" id="notifications">
+    <div class="card">
+        <div class="notif-toolbar">
+            <div class="notif-filter">
+                <a href="/user_center.php?tab=msg" class="<?php echo !$notifTypeFilter ? 'active' : ''; ?>">全部</a>
+                <a href="/user_center.php?tab=msg&amp;ntype=booking_success" class="<?php echo $notifTypeFilter === 'booking_success' ? 'active' : ''; ?>">预订</a>
+                <a href="/user_center.php?tab=msg&amp;ntype=ride_cancel" class="<?php echo $notifTypeFilter === 'ride_cancel' ? 'active' : ''; ?>">取消</a>
+                <a href="/user_center.php?tab=msg&amp;ntype=carpool_full" class="<?php echo $notifTypeFilter === 'carpool_full' ? 'active' : ''; ?>">满员</a>
+            </div>
+            <div style="margin-left:auto;display:flex;gap:6px;">
+                <?php if ($unreadCount > 0): ?>
+                <button type="button" class="btn btn-outline" style="height:32px;padding:0 12px;font-size:12.5px;" onclick="ucMarkAllRead()">全部已读</button>
+                <?php endif; ?>
+                <button type="button" class="btn btn-outline" style="height:32px;padding:0 12px;font-size:12.5px;" onclick="ucDeleteRead()">清理已读</button>
+            </div>
+        </div>
+
+        <?php if (empty($notifications)): ?>
+        <p style="font-size:13.5px;color:var(--ink-500);text-align:center;padding:18px 0;">暂无消息</p>
+        <?php else: ?>
+        <div id="notifList">
+        <?php foreach ($notifications as $n): ?>
+            <div class="notif-item<?php echo !$n['is_read'] ? ' is-unread' : ''; ?>" id="notif-<?php echo (int)$n['id']; ?>">
+                <a class="notif-body" href="<?php echo h($n['link'] ?: '#'); ?>" onclick="ucReadNotif(<?php echo (int)$n['id']; ?>)">
+                    <div class="notif-title" style="font-weight:<?php echo !$n['is_read'] ? '700' : '400'; ?>;"><?php echo h($n['title']); ?></div>
+                    <div class="notif-meta">
+                        <span><?php echo h(mb_substr($n['body'], 0, 50)); ?><?php echo mb_strlen($n['body']) > 50 ? '…' : ''; ?></span>
+                        <span class="time"><?php echo h(timeAgo($n['created_at'])); ?></span>
+                    </div>
+                </a>
+                <button type="button" class="notif-del" onclick="ucDeleteNotif(<?php echo (int)$n['id']; ?>)" aria-label="删除通知">
+                    <svg class="ico" style="width:16px;height:16px;"><use href="#i-x"/></svg>
+                </button>
+            </div>
+        <?php endforeach; ?>
+        </div>
         <?php endif; ?>
     </div>
 </div>
 
-<div class="uc-stats-grid">
-    <div class="uc-stat-card"><div class="uc-stat-icon">🚗</div><div class="uc-stat-val"><?php echo (int)$rideCount; ?></div><div class="uc-stat-lbl">发布</div></div>
-    <div class="uc-stat-card"><div class="uc-stat-icon">📌</div><div class="uc-stat-val"><?php echo (int)$bookingCount; ?></div><div class="uc-stat-lbl">预订</div></div>
-</div>
+<script>
+/* 个人中心：分段切换 + 通知操作。
+   刻意写成 ES5 并单独放一个 script 块：老手机内核缺少某些 API 时
+   只会中断本块，不会连带别处的脚本（2026-10-07 踩过 NodeList.forEach 的坑）。 */
+(function () {
+    var csrf = <?php echo json_encode(csrfToken()); ?>;
 
-<div class="quick-actions">
-    <a href="/post_ride.php" class="quick-action-btn"><span class="qa-icon">🚗</span>发布拼车</a>
-    <a href="/my_rides.php" class="quick-action-btn"><span class="qa-icon">📋</span>我的发布</a>
-    <a href="/my_bookings.php" class="quick-action-btn"><span class="qa-icon">📌</span>我的预订</a>
-    <?php if (isAdmin()): ?>
-    <a href="/admin/index.php" class="quick-action-btn"><span class="qa-icon">⚙️</span>后台管理</a>
-    <?php endif; ?>
-</div>
+    /* ---- 分段切换 ---- */
+    var seg = document.getElementById('ucSeg');
+    if (seg) {
+        var btns = seg.getElementsByTagName('button');
+        var panels = document.querySelectorAll('.uc-panel');
+        function show(tab) {
+            var i, el, cls;
+            for (i = 0; i < btns.length; i++) {
+                cls = (' ' + btns[i].className + ' ').replace(/\s+is-on\s+/, ' ');
+                btns[i].className = trim(cls) + (btns[i].getAttribute('data-tab') === tab ? ' is-on' : '');
+            }
+            for (i = 0; i < panels.length; i++) {
+                el = panels[i];
+                cls = (' ' + el.className + ' ').replace(/\s+is-active\s+/, ' ');
+                el.className = trim(cls) + (el.getAttribute('data-panel') === tab ? ' is-active' : '');
+            }
+        }
+        function trim(s) { return s.replace(/^\s+|\s+$/g, ''); }
+        for (var k = 0; k < btns.length; k++) {
+            (function (btn) {
+                btn.onclick = function () { show(btn.getAttribute('data-tab')); };
+            })(btns[k]);
+        }
+    }
 
-<?php if ($error): ?>
-<div class="flash-msg flash-error"><?php echo h($error); ?></div>
-<?php endif; ?>
-<?php if ($success): ?>
-<div class="flash-msg flash-success"><?php echo h($success); ?></div>
-<?php endif; ?>
-
-<!-- 个人资料 -->
-<div class="card">
-    <div class="card-header">📋 个人资料</div>
-    <form method="post" action="user_center.php">
-        <input type="hidden" name="action" value="update_profile">
-        <input type="hidden" name="csrf_token" value="<?php echo csrfToken(); ?>">
-
-        <div class="form-group">
-            <label class="form-label">手机号</label>
-            <input type="text" class="form-input" value="<?php echo h($user['phone']); ?>" disabled>
-        </div>
-        <div class="form-group">
-            <label class="form-label">邮箱</label>
-            <input type="email" class="form-input" value="<?php echo h($user['email']); ?>" disabled>
-        </div>
-        <div class="form-group">
-            <label class="form-label" for="nickname">昵称</label>
-            <input type="text" id="nickname" name="nickname" class="form-input" value="<?php echo h($user['nickname'] ?? ''); ?>" placeholder="设置一个昵称">
-        </div>
-        <div class="form-group">
-            <label class="form-label">性别</label>
-            <div style="display:flex;gap:12px;padding-top:4px;">
-                <label style="display:flex;align-items:center;gap:4px;cursor:pointer;">
-                    <input type="radio" name="gender" value="male" <?php echo $user['gender'] === 'male' ? 'checked' : ''; ?>> 男
-                </label>
-                <label style="display:flex;align-items:center;gap:4px;cursor:pointer;">
-                    <input type="radio" name="gender" value="female" <?php echo $user['gender'] === 'female' ? 'checked' : ''; ?>> 女
-                </label>
-                <label style="display:flex;align-items:center;gap:4px;cursor:pointer;">
-                    <input type="radio" name="gender" value="other" <?php echo $user['gender'] === 'other' || !$user['gender'] ? 'checked' : ''; ?>> 保密
-                </label>
-            </div>
-        </div>
-        <div class="form-group">
-            <label class="form-label" for="campus">所属校区</label>
-            <select id="campus" name="campus" class="form-select">
-                <option value="">不选择</option>
-                <?php foreach ($campuses as $c): ?>
-                <option value="<?php echo h($c); ?>" <?php echo $user['campus'] === $c ? 'selected' : ''; ?>><?php echo h($c); ?></option>
-                <?php endforeach; ?>
-            </select>
-        </div>
-        <button type="submit" class="btn btn-primary btn-block">保存资料</button>
-    </form>
-</div>
-
-<!-- 修改密码 -->
-<div class="card">
-    <div class="card-header">🔒 修改密码</div>
-    <form method="post" action="user_center.php">
-        <input type="hidden" name="action" value="change_password">
-        <input type="hidden" name="csrf_token" value="<?php echo csrfToken(); ?>">
-
-        <div class="form-group">
-            <label class="form-label" for="old_password">原密码</label>
-            <input type="password" id="old_password" name="old_password" class="form-input" required>
-        </div>
-        <div class="form-group">
-            <label class="form-label" for="new_password">新密码</label>
-            <input type="password" id="new_password" name="new_password" class="form-input" minlength="8" required>
-            <p class="form-hint">至少8位，包含字母和数字</p>
-        </div>
-        <div class="form-group">
-            <label class="form-label" for="confirm_password">确认新密码</label>
-            <input type="password" id="confirm_password" name="confirm_password" class="form-input" minlength="8" required>
-        </div>
-        <button type="submit" class="btn btn-primary btn-block">修改密码</button>
-    </form>
-</div>
-
-<!-- 通知中心 -->
-<div class="card" id="notifications">
-    <div class="card-header">🔔 通知中心</div>
-    <?php
-    $notifications = getNotifications($user['id'], 20);
-    if (empty($notifications)): ?>
-    <p style="color:var(--gray-400);text-align:center;padding:16px 0;font-size:14px;">暂无通知</p>
-    <?php else: ?>
-        <?php foreach ($notifications as $n): ?>
-        <div class="my-ride-mini" style="<?php echo $n['is_read'] ? '' : 'background:var(--primary-bg);border-radius:6px;padding:10px;margin:4px 0;'; ?>">
-            <div class="ride-info">
-                <div class="ride-route-text"><?php echo h($n['title']); ?></div>
-                <div class="ride-meta-text"><?php echo h($n['body']); ?> · <?php echo timeAgo($n['created_at']); ?></div>
-            </div>
-            <?php if (!$n['is_read']): ?>
-            <a href="?mark_read=<?php echo (int)$n['id']; ?>" style="font-size:12px;color:var(--primary);flex-shrink:0;">已读</a>
-            <?php endif; ?>
-            <?php if ($n['link']): ?>
-            <a href="<?php echo h($n['link']); ?>" style="font-size:12px;color:var(--primary);flex-shrink:0;">查看</a>
-            <?php endif; ?>
-        </div>
-        <?php endforeach; ?>
-        <form method="post" style="margin-top:8px;">
-            <input type="hidden" name="csrf_token" value="<?php echo csrfToken(); ?>">
-            <button type="submit" formaction="?mark_all_read=1" class="btn btn-sm btn-outline" style="width:100%;">全部标记已读</button>
-        </form>
-    <?php endif; ?>
-</div>
-
-<?php
-// 处理标记已读
-if (isset($_GET['mark_read'])) {
-    markNotificationRead((int)$_GET['mark_read'], $user['id']);
-    header('Location: /user_center.php#notifications');
-    exit;
-}
-if (isset($_GET['mark_all_read'])) {
-    markAllNotificationsRead($user['id']);
-    header('Location: /user_center.php#notifications');
-    exit;
-}
-?>
+    /* ---- 通知操作 ---- */
+    function post(action, data) {
+        var body = 'action=' + encodeURIComponent(action) + '&csrf_token=' + encodeURIComponent(csrf);
+        for (var key in data) {
+            if (data.hasOwnProperty(key)) { body += '&' + key + '=' + encodeURIComponent(data[key]); }
+        }
+        return fetch('user_center.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: body
+        });
+    }
+    window.ucReadNotif = function (id) { post('read_notif', { id: id }); };
+    window.ucDeleteNotif = function (id) {
+        post('delete_notif', { id: id }).then(function () {
+            var el = document.getElementById('notif-' + id);
+            if (el && el.parentNode) { el.parentNode.removeChild(el); }
+        });
+    };
+    window.ucMarkAllRead = function () {
+        post('read_all_notif', {}).then(function () { location.reload(); });
+    };
+    window.ucDeleteRead = function () {
+        if (!confirm('确定清理所有已读通知？')) return;
+        post('delete_read_notif', {}).then(function () { location.reload(); });
+    };
+})();
+</script>
 
 <?php include __DIR__ . '/footer.php'; ?>

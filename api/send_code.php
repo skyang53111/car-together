@@ -1,6 +1,9 @@
 <?php
 /**
  * 校区拼车平台 - 统一验证码发送 API
+ * 参数: type=register|reset|change_email
+ *       email (目标邮箱)
+ *       csrf_token (可选GET请求无需)
  */
 require_once __DIR__ . '/config.php';
 
@@ -16,25 +19,30 @@ $type  = input('type');
 $email = input('email');
 $userId = isLoggedIn() ? $_SESSION['user_id'] : null;
 
+// 基本校验
 if (empty($email) || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
     http_response_code(400);
     echo json_encode(['success' => false, 'message' => '请输入有效的邮箱地址'], JSON_UNESCAPED_UNICODE);
     exit;
 }
 
+// 频率限制
 if (!checkRateLimit('send_code', RATE_SEND_CODE_MAX, RATE_SEND_CODE_WINDOW)) {
     echo json_encode(['success' => false, 'message' => '操作过于频繁，请1小时后再试'], JSON_UNESCAPED_UNICODE);
     exit;
 }
 
+// CSRF 保护：已登录操作（change_email）严格校验
 if ($type === 'change_email' && !verifyCsrf(input('csrf_token'))) {
     http_response_code(403);
     echo json_encode(['success' => false, 'message' => '表单已过期，请刷新重试'], JSON_UNESCAPED_UNICODE);
     exit;
 }
 
+// 根据类型执行不同逻辑
 switch ($type) {
     case 'register':
+        // 注册：检查邮箱未被绑定
         $stmt = $pdo->prepare("SELECT id FROM users WHERE email = ?");
         $stmt->execute([$email]);
         if ($stmt->fetch()) {
@@ -47,8 +55,10 @@ switch ($type) {
         break;
 
     case 'reset':
+        // 找回密码：email 参数可能是手机号或邮箱，需兼容
         $queryEmail = $email;
         if (strpos($email, '@') === false) {
+            // 手机号 → 查邮箱
             $stmt = $pdo->prepare("SELECT email FROM users WHERE phone = ?");
             $stmt->execute([$email]);
             $u = $stmt->fetch();
@@ -71,6 +81,7 @@ switch ($type) {
         break;
 
     case 'change_email':
+        // 修改邮箱（需登录）：检查新邮箱未被绑定
         if (!$userId) {
             echo json_encode(['success' => false, 'message' => '请先登录'], JSON_UNESCAPED_UNICODE);
             exit;
@@ -91,6 +102,7 @@ switch ($type) {
         exit;
 }
 
+// 返回结果
 if ($sent) {
     echo json_encode(['success' => true, 'message' => '验证码已发送，请查收邮件'], JSON_UNESCAPED_UNICODE);
 } else {

@@ -5,6 +5,13 @@
 require_once __DIR__ . '/config.php';
 setPageTitle('注册');
 
+// 仅 AUTH_MODE=local（默认）时开放本机注册；接入统一认证后账号由认证服务统一开立。
+if (AUTH_MODE !== 'local') {
+    $target = input('redirect', 'get') ?: '/index.php';
+    header('Location: /oauth/login.php?redirect=' . urlencode($target));
+    exit;
+}
+
 if (isLoggedIn()) {
     header('Location: /index.php');
     exit;
@@ -181,7 +188,7 @@ document.getElementById('sendCodeBtn').addEventListener('click', function() {
         .then(function(data) {
             alert(data.message);
             if (data.success) {
-                var sec = 60;
+                             var sec = 60;
                 btn.textContent = sec + 's后重发';
                 var timer = setInterval(function() {
                     sec--;

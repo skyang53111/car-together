@@ -103,6 +103,7 @@ input, select, textarea, button { font-family: inherit; font-size: inherit; }
 .nav-btn-primary { background: var(--primary); color: var(--white); border-color: var(--primary); }
 .nav-btn-primary:hover { background: var(--primary-dark); color: var(--white); }
 
+/* 头像按钮 / 下拉菜单 */
 .nav-user-menu { position: relative; }
 .nav-avatar-btn {
     width: 36px; height: 36px; border-radius: 50%; border: none;
@@ -159,6 +160,7 @@ input, select, textarea, button { font-family: inherit; font-size: inherit; }
 .card-header { font-size: 16px; font-weight: 600; margin-bottom: 8px; color: var(--gray-900); }
 .card-body { color: var(--gray-600); font-size: 14px; }
 
+/* 行程卡片 */
 .ride-card {
     background: var(--white); border-radius: var(--radius-lg);
     box-shadow: var(--shadow-md); padding: 0; margin-bottom: 14px;
@@ -296,6 +298,7 @@ input, select, textarea, button { font-family: inherit; font-size: inherit; }
 .auth-link { text-align: center; margin-top: 16px; font-size: 14px; color: var(--gray-500); }
 .auth-link a { font-weight: 600; }
 
+/* 验证码输入 */
 .code-input-group { display: flex; gap: 8px; align-items: center; }
 .code-input-group .form-input { flex: 1; min-width: 0; }
 .send-code-btn {
@@ -307,7 +310,7 @@ input, select, textarea, button { font-family: inherit; font-size: inherit; }
 .send-code-btn:hover { background: var(--primary-bg); }
 .send-code-btn:disabled { opacity: .5; cursor: not-allowed; }
 
-/* --- 拼车详情 --- */
+/* --- 行程详情 --- */
 .ride-detail { max-width: 600px; margin: 0 auto; }
 .ride-detail-card { background: var(--white); border-radius: var(--radius-lg); box-shadow: var(--shadow-md); overflow: hidden; }
 .ride-detail-header { background: var(--primary); color: var(--white); padding: 24px; text-align: center; }
@@ -340,6 +343,7 @@ input, select, textarea, button { font-family: inherit; font-size: inherit; }
 .user-badge-info { background: var(--primary-bg); color: var(--primary); }
 .user-badge-level { background: var(--gray-100); color: var(--gray-600); }
 
+/* 安全评分 */
 .security-score {
     display: flex; align-items: center; gap: 12px; padding: 14px 16px;
     background: var(--white); border-radius: var(--radius); box-shadow: var(--shadow); margin-bottom: 12px;
@@ -357,6 +361,7 @@ input, select, textarea, button { font-family: inherit; font-size: inherit; }
 .security-score .score-bar { height: 4px; border-radius: 2px; background: var(--gray-100); margin-top: 6px; overflow: hidden; }
 .security-score .score-bar-fill { height: 100%; border-radius: 2px; transition: width .3s; }
 
+/* 用户中心统计 */
 .uc-stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 16px; }
 .uc-stat-card {
     background: var(--white); border-radius: var(--radius); padding: 14px 10px;
@@ -366,6 +371,7 @@ input, select, textarea, button { font-family: inherit; font-size: inherit; }
 .uc-stat-card .uc-stat-val { font-size: 20px; font-weight: 700; }
 .uc-stat-card .uc-stat-lbl { font-size: 12px; color: var(--gray-500); margin-top: 2px; }
 
+/* 我的发布卡片 */
 .my-ride-mini {
     display: flex; align-items: center; gap: 12px;
     padding: 10px 0; border-bottom: 1px solid var(--gray-100);
@@ -384,6 +390,7 @@ input, select, textarea, button { font-family: inherit; font-size: inherit; }
 .seats-available { background: var(--success-bg); color: var(--success); }
 .seats-full { background: var(--warning-bg); color: var(--warning); }
 
+/* 空状态引导 */
 .empty-guide {
     text-align: center; padding: 24px 16px; color: var(--gray-400);
 }
@@ -391,6 +398,7 @@ input, select, textarea, button { font-family: inherit; font-size: inherit; }
 .empty-guide p { font-size: 13px; margin-bottom: 8px; }
 .empty-guide .empty-action { display: inline-block; margin-top: 4px; }
 
+/* 通知操作栏 */
 .notif-toolbar {
     display: flex; gap: 8px; align-items: center; margin-bottom: 10px; flex-wrap: wrap;
 }
@@ -401,6 +409,7 @@ input, select, textarea, button { font-family: inherit; font-size: inherit; }
 }
 .notif-toolbar .notif-filter a.active { background: var(--primary-bg); color: var(--primary); font-weight: 600; }
 
+/* 快捷入口 */
 .quick-actions { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 16px; }
 .quick-action-btn {
     display: flex; flex-direction: column; align-items: center; gap: 6px;
@@ -545,6 +554,7 @@ tr:hover td { background: var(--gray-50); }
 .admin-main h1 { font-size: 22px; font-weight: 700; color: var(--gray-900); }
 .admin-table-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 
+/* 后台统计卡片变体 */
 .stat-card-blue { border-top: 3px solid var(--primary); }
 .stat-card-green { border-top: 3px solid var(--success); }
 .stat-card-orange { border-top: 3px solid var(--warning); }
@@ -554,6 +564,7 @@ tr:hover td { background: var(--gray-50); }
 .stat-card .stat-trend .up { color: var(--success); }
 .stat-card .stat-trend .down { color: var(--danger); }
 
+/* 趋势图表 */
 .trend-chart-wrap { background: var(--white); border-radius: var(--radius); box-shadow: var(--shadow); padding: 20px; margin-bottom: 20px; }
 .trend-chart-wrap h3 { font-size: 16px; font-weight: 600; margin-bottom: 16px; color: var(--gray-800); }
 .css-bar-chart { display: flex; align-items: flex-end; gap: 6px; height: 120px; padding-top: 8px; }
@@ -566,6 +577,7 @@ tr:hover td { background: var(--gray-50); }
 }
 .css-bar-chart .bar-label { font-size: 11px; color: var(--gray-500); }
 
+/* 待办事项卡片 */
 .todo-card { display: flex; align-items: center; gap: 12px; padding: 14px 16px; background: var(--white); border-radius: var(--radius); box-shadow: var(--shadow); margin-bottom: 10px; border-left: 4px solid var(--warning); }
 .todo-card .todo-icon { font-size: 24px; }
 .todo-card .todo-body { flex: 1; }
@@ -573,6 +585,7 @@ tr:hover td { background: var(--gray-50); }
 .todo-card .todo-desc { font-size: 12px; color: var(--gray-500); margin-top: 2px; }
 .todo-card .todo-count { font-size: 22px; font-weight: 700; color: var(--warning); }
 
+/* 操作下拉菜单 */
 .action-dropdown { position: relative; display: inline-block; }
 .action-dropdown .action-btn {
     padding: 5px 12px; font-size: 13px; border-radius: var(--radius-sm);
@@ -593,6 +606,7 @@ tr:hover td { background: var(--gray-50); }
 .action-dropdown .action-menu button:hover, .action-dropdown .action-menu a:hover { background: var(--gray-50); }
 .action-dropdown .action-menu .danger { color: var(--danger); }
 
+/* 热门路线排行 */
 .hot-route-item { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--gray-100); }
 .hot-route-item:last-child { border-bottom: none; }
 .hot-route-rank { width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; flex-shrink: 0; }
@@ -603,6 +617,7 @@ tr:hover td { background: var(--gray-50); }
 .hot-route-name { flex: 1; font-size: 14px; color: var(--gray-700); }
 .hot-route-count { font-size: 13px; font-weight: 600; color: var(--gray-500); }
 
+/* 系统健康状态 */
 .health-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
 .health-item { background: var(--white); border-radius: var(--radius); padding: 16px; box-shadow: var(--shadow); }
 .health-item .health-label { font-size: 13px; color: var(--gray-500); margin-bottom: 6px; }
@@ -623,6 +638,7 @@ tr:hover td { background: var(--gray-50); }
     .stats-grid { grid-template-columns: repeat(2, 1fr); }
 }
 
+/* 打印样式 */
 @media print {
     .top-nav, .bottom-nav, .ride-card-actions, .btn { display: none !important; }
     .main-content { padding-top: 0; }

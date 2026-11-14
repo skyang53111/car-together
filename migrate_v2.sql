@@ -16,9 +16,12 @@ ALTER TABLE `users`
 -- 2. 添加 phone 唯一索引
 ALTER TABLE `users` ADD UNIQUE KEY `uk_phone` (`phone`);
 
--- 3. 设置管理员默认手机号（请改为实际手机号）
--- UPDATE `users` SET `phone` = '13800000000', `phone_verified` = 1 WHERE `email` = 'admin@example.com' AND `phone` IS NULL;
+-- 3. email 唯一索引保留（如果已存在则跳过）
+-- ALTER TABLE `users` ADD UNIQUE KEY `uk_email` (`email`);
 
--- 4. 插入 email_notifications 配置（如果不存在）
+-- 4. 设置管理员默认手机号（请改为实际手机号）
+UPDATE `users` SET `phone` = '13800000000', `phone_verified` = 1 WHERE `email` = 'admin@campus.com' AND `phone` IS NULL;
+
+-- 5. 插入 email_notifications 配置（如果不存在）
 INSERT INTO `site_config` (`config_key`, `config_value`) VALUES ('email_notifications', '1')
 ON DUPLICATE KEY UPDATE `config_value` = `config_value`;

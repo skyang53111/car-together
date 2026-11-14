@@ -1,19 +1,35 @@
 <?php
 /**
- * 校区拼车平台 - 登录页面
+ * 校区拼车平台 - 登录入口
+ *
+ * AUTH_MODE = local（默认）：仅本机账号密码登录，无需任何外部服务
+ * AUTH_MODE = both          ：同时提供统一认证登录与本机手机号/邮箱+密码登录
+ * AUTH_MODE = casdoor       ：完全切换到统一身份认证，本页直接跳转 /oauth/login.php
  */
 require_once __DIR__ . '/config.php';
 setPageTitle('登录');
 
+// 如果已登录，重定向
 if (isLoggedIn()) {
     header('Location: /index.php');
     exit;
 }
 
-$error = '';
-$redirect = input('redirect', 'get') ?: ($_SESSION['redirect_url'] ?? '/index.php');
+$redirect = input('redirect', 'get') ?: ($_SESSION['redirect_url'] ?? '');
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+// ========== 完全切换到统一身份认证 ==========
+if (AUTH_MODE === 'casdoor') {
+    $url = '/oauth/login.php';
+    if ($redirect !== '' && $redirect !== '/oauth/login.php') {
+        $url .= '?redirect=' . urlencode($redirect);
+    }
+    header('Location: ' . $url);
+    exit;
+}
+
+$error = '';
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && AUTH_MODE !== 'casdoor') {
     if (!verifyCsrf(input('csrf_token'))) {
         $error = '表单已过期，请刷新页面重试';
     } else {
@@ -31,21 +47,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if ($user['status'] === 'disabled') {
                     $error = '该账号已被禁用，请联系管理员';
                 } else {
+                    // 登录成功
                     session_regenerate_id(true);
                     $_SESSION['user_id'] = $user['id'];
                     $_SESSION['user_role'] = $user['role'];
+                    $_SESSION['auth_source'] = 'local';
 
+                    // 更新登录信息
                     $pdo->prepare("UPDATE users SET last_login = NOW(), last_ip = ? WHERE id = ?")
                         ->execute([getClientIP(), $user['id']]);
 
+                    // 清除该IP的登录限制
                     $pdo->prepare("DELETE FROM rate_limits WHERE ip_address = ? AND action = 'login'")
                         ->execute([getClientIP()]);
 
+                    // 安全重定向：仅允许站点内相对路径
                     $target = '/index.php';
                     $parsed = parse_url($redirect);
                     if (empty($parsed['host']) && empty($parsed['scheme'])) {
                         $path = $parsed['path'] ?? $redirect;
-                        $target = (str_starts_with($path, '/') && !str_starts_with($path, '//')) ? $path : '/index.php';
+                        $target = (str_starts_with($path, '/') && !str_starts_with($path, '//') && strpos($path, '\\') === false) ? $path : '/index.php';
                     }
                     unset($_SESSION['redirect_url']);
                     header('Location: ' . $target);
@@ -53,6 +74,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
             } else {
                 $error = '手机号/邮箱或密码错误';
+                // 记录失败次数（通过rate_limit机制）
+                checkRateLimit('login', RATE_LOGIN_MAX, RATE_LOGIN_WINDOW);
             }
         }
     }
@@ -67,6 +90,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         <?php if ($error): ?>
         <div class="flash-msg flash-error"><?php echo h($error); ?></div>
+        <?php endif; ?>
+
+        <?php if (AUTH_MODE === 'both'): ?>
+        <!-- 统一身份认证登录（推荐） -->
+        <a href="/oauth/login.php<?php echo $redirect !== '' ? '?redirect=' . urlencode($redirect) : ''; ?>"
+           class="btn btn-primary btn-block btn-lg" style="margin-bottom:16px;">
+            <svg class="ico"><use href="#i-lock"/></svg>统一身份认证登录
+        </a>
+        <div style="display:flex;align-items:center;gap:10px;margin:4px 0 16px;color:var(--ink-500);font-size:12.5px;">
+            <span style="flex:1;height:1px;background:var(--ink-200);"></span>
+            <span>或使用本机账号</span>
+            <span style="flex:1;height:1px;background:var(--ink-200);"></span>
+        </div>
         <?php endif; ?>
 
         <form method="post" action="login.php">
@@ -88,12 +124,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             <button type="submit" class="btn btn-primary btn-block btn-lg">登录</button>
         </form>
 
-        <div class="auth-link">
-            还没有账号？<a href="/register.php">立即注册</a>
+        <?php if (AUTH_MODE !== 'casdoor'): ?>
+        <div class="auth-link" style="margin-top:14px;display:flex;justify-content:space-between;font-size:13px;">
+            <a href="/forgot_password.php" style="color:var(--ink-500);">忘记密码？</a>
+            <a href="/register.php<?php echo $redirect !== '' ? '?redirect=' . urlencode($redirect) : ''; ?>" style="color:var(--brand);font-weight:600;">没有账号？注册</a>
         </div>
-        <div class="auth-link" style="margin-top:4px;">
-            <a href="/forgot_password.php" style="font-size:13px;color:var(--gray-500);">忘记密码？</a>
+        <?php endif; ?>
+        <?php if (AUTH_MODE !== 'local'): ?>
+        <div class="auth-link" style="margin-top:12px;">
+            <a href="/oauth/login.php" style="font-size:13px;color:var(--ink-500);">统一身份认证登录</a>
         </div>
+        <?php endif; ?>
     </div>
 </div>
 

@@ -21,6 +21,30 @@ defined('DB_CHARSET')   or define('DB_CHARSET', 'utf8mb4');
 defined('SESSION_LIFETIME') or define('SESSION_LIFETIME', 86400);
 defined('BCRYPT_COST')      or define('BCRYPT_COST', 10);
 
+// ==================== 统一身份认证（Casdoor / OIDC，可选）====================
+// 不接统一认证时保持 AUTH_MODE = 'local' 即可，本机账号密码/邮箱验证码登录，无外部依赖。
+// 想接入 Casdoor（或任何标准 OIDC 服务）时：把下面几项写到 config.local.php，
+// 并把 AUTH_MODE 改成 'casdoor'（只走统一认证）或 'both'（两种登录都提供）。
+// AUTH_MODE: casdoor = 只走统一认证 | both = 两种登录都提供 | local = 仅本地登录
+defined('AUTH_MODE')             or define('AUTH_MODE', 'local');
+defined('CASDOOR_BASE')          or define('CASDOOR_BASE', 'https://your-auth-domain.com');
+defined('CASDOOR_CLIENT_ID')     or define('CASDOOR_CLIENT_ID', '');      // 实际值放 config.local.php
+defined('CASDOOR_CLIENT_SECRET') or define('CASDOOR_CLIENT_SECRET', '');  // 实际值放 config.local.php
+defined('CASDOOR_REDIRECT_URI')  or define('CASDOOR_REDIRECT_URI', SITE_URL . '/oauth/callback.php');
+defined('CASDOOR_SCOPE')         or define('CASDOOR_SCOPE', 'openid profile email phone');
+defined('CASDOOR_ACCOUNT_URL')   or define('CASDOOR_ACCOUNT_URL', rtrim(CASDOOR_BASE, '/') . '/account');
+// 单点登出后回跳的地址；必须登记在 Casdoor 应用的「许可跳转列表」中。
+// 若暂未登记，可在 config.local.php 里把它定义为空串 ''，则登出时不带该参数（就不会报"跳转列表未找到"）。
+defined('CASDOOR_LOGOUT_REDIRECT') or define('CASDOOR_LOGOUT_REDIRECT', SITE_URL . '/oauth/logged_out.php');
+// Webhook 共享密钥：Casdoor 删除/修改用户时会主动推送事件到 /oauth/casdoor_webhook.php，用它校验来源。
+// 留空 = 关闭该端点（一律返回 403）。实际值请写在 config.local.php，不要写死在这里。
+defined('CASDOOR_WEBHOOK_SECRET') or define('CASDOOR_WEBHOOK_SECRET', '');
+
+// ==================== 帮助与反馈 ====================
+// QQ 反馈群（加群分享链接）。资料页的「帮助与反馈」入口指向它。
+// 链接失效或想换群时改这一行即可；留空则资料页不显示该入口。
+defined('QQ_GROUP_URL') or define('QQ_GROUP_URL', '');   // 例：'https://qun.qq.com/...#加群分享链接'
+
 // ==================== 验证码配置 ====================
 defined('CODE_EXPIRE')  or define('CODE_EXPIRE', 600);
 defined('CODE_LENGTH')  or define('CODE_LENGTH', 6);
@@ -41,7 +65,7 @@ defined('RIDES_PER_PAGE')  or define('RIDES_PER_PAGE', 12);
 defined('CAMPUSES') or define('CAMPUSES', json_encode([
     '南校区',
     '北校区',
-    '月亮岛校区'
+    '东校区'
 ]));
 
 // ==================== 初始化 ====================
@@ -73,5 +97,5 @@ if (session_status() === PHP_SESSION_NONE) {
 // 自动加载函数库
 require_once __DIR__ . '/functions.php';
 
-// 自动完成已过期的拼车（每请求轻量操作）
+// 自动完成已过期的行程（每请求轻量操作）
 autoCompleteRides();

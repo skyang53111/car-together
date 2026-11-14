@@ -90,7 +90,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // ========== Toast提示 ==========
+    // 页面中可调用 showToast(message, type)
     window.showToast = function (message, type = 'info') {
+        // 移除已有的toast
         document.querySelectorAll('.toast-msg').forEach(el => el.remove());
 
         const toast = document.createElement('div');
@@ -114,6 +116,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }, 2500);
     };
 
+    // 添加下滑动画的keyframe
     const styleSheet = document.createElement('style');
     styleSheet.textContent = '@keyframes slideDown { from { opacity: 0; transform: translateX(-50%) translateY(-10px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }';
     document.head.appendChild(styleSheet);
