@@ -92,6 +92,25 @@ CREATE TABLE `bookings` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='预订记录表';
 
 -- ----------------------------
+-- 站内通知表
+-- ----------------------------
+DROP TABLE IF EXISTS `notifications`;
+CREATE TABLE `notifications` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `user_id` int(11) NOT NULL COMMENT '接收者',
+  `msg_type` varchar(30) NOT NULL COMMENT '类型',
+  `title` varchar(200) NOT NULL COMMENT '通知标题',
+  `body` text COMMENT '通知正文',
+  `link` varchar(300) DEFAULT NULL COMMENT '跳转链接',
+  `is_read` tinyint(1) DEFAULT 0 COMMENT '是否已读',
+  `created_at` datetime DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_user_read` (`user_id`, `is_read`),
+  KEY `idx_created` (`created_at`),
+  CONSTRAINT `fk_notifications_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='站内通知表';
+
+-- ----------------------------
 -- 验证码表
 -- ----------------------------
 DROP TABLE IF EXISTS `verification_codes`;

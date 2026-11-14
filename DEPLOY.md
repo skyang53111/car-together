@@ -26,7 +26,7 @@
 | --- | --- |
 | 操作系统 | Linux（CentOS / Ubuntu / Debian 均可），Windows 也能跑但仅建议本地开发 |
 | Web 服务器 | Nginx 1.18+（推荐）/ Apache 2.4+ |
-| PHP | 7.4 / 8.0 / 8.1（推荐 8.1） |
+| PHP | 8.0 / 8.1 / 8.2（推荐 8.1）。代码用到 `match`、`str_starts_with`，**PHP 7.4 跑不起来** |
 | PHP 扩展 | `pdo_mysql`、`openssl`、`mbstring`（缺 `openssl` 会导致验证码邮件发不出去） |
 | 数据库 | MySQL 5.7+ / MariaDB 10.3+ |
 | 磁盘 | 50MB 足够 |
@@ -84,7 +84,7 @@ mysql -u carpool -p carpool < migrate_v5.sql   # 统一认证字段
 # 需要小程序 / 订阅消息时再执行 setup_miniprogram.sql、setup_subscribe.sql
 ```
 
-导入后应有这些表：`users`、`rides`、`bookings`、`verification_codes`、`rate_limits`、
+导入后应有这些表：`users`、`rides`、`bookings`、`notifications`、`verification_codes`、`rate_limits`、
 `site_config`，以及小程序相关的 `user_tokens`、`user_subscriptions`、`wechat_tokens`。
 
 默认管理员：`admin@campus.com` / `admin123456`——**登录后第一件事就是改掉它**。

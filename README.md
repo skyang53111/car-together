@@ -1,6 +1,6 @@
 <p align="center">
   <br>
-  <img src="https://img.shields.io/badge/PHP-7.4%2B-777BB4?style=for-the-badge&logo=php&logoColor=white" alt="PHP">
+  <img src="https://img.shields.io/badge/PHP-8.0%2B-777BB4?style=for-the-badge&logo=php&logoColor=white" alt="PHP">
   <img src="https://img.shields.io/badge/MySQL-5.7%2B-4479A1?style=for-the-badge&logo=mysql&logoColor=white" alt="MySQL">
   <img src="https://img.shields.io/badge/Mobile_First-✓-6DB33F?style=for-the-badge&logo=google-chrome&logoColor=white" alt="Mobile First">
   <img src="https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge" alt="MIT">
@@ -110,7 +110,7 @@
 | 项目 | 要求 |
 |------|------|
 | Web 服务器 | Nginx 1.18+ / Apache 2.4+ |
-| PHP | **7.4** / **8.0** / **8.1**（推荐 8.1） |
+| PHP | **8.0** / **8.1** / **8.2**（推荐 8.1；代码用到 `match` 与 `str_starts_with`，7.4 跑不起来） |
 | 数据库 | MySQL 5.7+ / MariaDB 10.3+ |
 | PHP 扩展 | `pdo_mysql`、`openssl`、`mbstring` |
 
@@ -118,8 +118,8 @@
 
 ```bash
 # 1. 克隆项目
-git clone https://github.com/skyang53111/car-together.git
-cd car-together
+git clone https://github.com/your-username/carpool-campus.git
+cd carpool-campus
 
 # 2. 创建本地配置（敏感信息单独存放，不会被 Git 追踪）
 cp config.local.example.php config.local.php
@@ -182,7 +182,7 @@ mysql -u root -p your_database_name < migrate_v5.sql    # 统一认证字段（c
 ## 📁 项目结构
 
 ```
-car-together/
+carpool-campus/
 ├── admin/                       # 后台管理模块（独立外观，不加载 glass.css）
 │   ├── index.php                # 📊 仪表盘
 │   ├── users.php                # 👥 用户管理
