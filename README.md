@@ -118,8 +118,8 @@
 
 ```bash
 # 1. 克隆项目
-git clone https://github.com/your-username/carpool-campus.git
-cd carpool-campus
+git clone https://github.com/skyang53111/car-together.git
+cd car-together
 
 # 2. 创建本地配置（敏感信息单独存放，不会被 Git 追踪）
 cp config.local.example.php config.local.php
@@ -182,7 +182,7 @@ mysql -u root -p your_database_name < migrate_v5.sql    # 统一认证字段（c
 ## 📁 项目结构
 
 ```
-carpool-campus/
+car-together/
 ├── admin/                       # 后台管理模块（独立外观，不加载 glass.css）
 │   ├── index.php                # 📊 仪表盘
 │   ├── users.php                # 👥 用户管理
