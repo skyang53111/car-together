@@ -35,7 +35,7 @@ if ($action === 'wx_login') {
     $ch = curl_init();
     curl_setopt_array($ch, [
         CURLOPT_URL => $url, CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_TIMEOUT => 8, CURLOPT_SSL_VERIFYPEER => false,
+        CURLOPT_TIMEOUT => 8, CURLOPT_SSL_VERIFYPEER => true,
     ]);
     $resp = curl_exec($ch);
     $err  = curl_error($ch);

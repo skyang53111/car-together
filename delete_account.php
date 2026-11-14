@@ -28,7 +28,7 @@ $userEmail = '';
 $userRole = $_SESSION['user_role'] ?? 'user';
 
 // 先获取用户信息
-$stmt = $pdo->prepare("SELECT email, role FROM users WHERE id = ?");
+$stmt = $pdo->prepare("SELECT email, role, password_hash FROM users WHERE id = ?");
 $stmt->execute([$userId]);
 $user = $stmt->fetch();
 
@@ -36,6 +36,15 @@ if (!$user) {
     flashMessage('用户不存在', 'error');
     header('Location: /profile.php');
     exit;
+}
+
+// 本机账号体系下，注销不可逆，要求再输一次密码确认（接入统一认证时由认证平台把关）
+if (AUTH_MODE === 'local') {
+    if (!password_verify(input('password'), (string)$user['password_hash'])) {
+        flashMessage('密码不正确，账号未注销', 'error');
+        header('Location: /profile.php');
+        exit;
+    }
 }
 
 // 超级管理员不可注销

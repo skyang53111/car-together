@@ -7,6 +7,32 @@
 
 ---
 
+## 未发布 · 安全加固与仓库规范
+
+这一轮是代码审查后补的加固，**行为上有几处变化**，同步回线上前请过一遍。
+
+**安全**
+
+- 找回密码增加失败限流（10 次/小时）：6 位验证码只有一百万种可能，原来可以无限次尝试
+- 找回密码不再区分「账号不存在」与「验证码错误」，接口层与页面层都改成统一提示，避免被用来探测邮箱是否注册过
+- `api/v1/` 三处 `curl` 关闭证书校验（`CURLOPT_SSL_VERIFYPEER => false`）改为校验，
+  涉及 `auth_v2.php` 的微信登录与 `subscribe_send.php` 的两处微信接口调用
+- 会话 cookie 增加 `HttpOnly`、`SameSite=Lax`，`SITE_URL` 为 https 时自动带 `Secure`
+- 小程序接口的登录 token **只从 `Authorization: Bearer` 读取**，不再接受 `?token=`：
+  URL 会进访问日志、Referer 和浏览器历史，等同于泄露。**小程序端需要同步改成请求头**
+- 本机账号模式（`AUTH_MODE=local`）下注销账号需再输一次登录密码，弹窗里加了密码框
+- 未配置 `config.local.php` 时给出可读提示，不再抛 `Undefined constant DB_HOST` 白屏
+
+**工程与仓库规范**
+
+- 后台仪表盘的 7 天趋势统计改为参数化查询（原先是内部生成的日期字符串拼进 SQL）
+- 新增 `.gitattributes`（统一 LF）、`.editorconfig`、`SECURITY.md`、`robots.txt`
+- 新增 GitHub Actions：对 PHP 8.0 / 8.1 / 8.2 跑 `php -l`，并检查 `config.local.php` 没被提交、
+  `setup.sql` 覆盖了代码用到的所有表（防止再出现 v1.5.2 那种「缺表导致全新安装 500」）
+- 清掉未使用的 `i-edit` 图标与 `.gitignore` 里早期遗留的 `poo.txt`
+
+---
+
 ## v1.5.2 — 修复自定义地址的显示
 
 **问题**：发布页选「自定义地址…」后，路线下面会**多出一个输入框**，和上面下拉里的文字重复；

@@ -170,8 +170,12 @@ include __DIR__ . '/header.php';
     </p>
     <div class="da">
         <a class="btn btn-outline" href="/profile.php" id="pfDelCancel">取消</a>
-        <form method="post" action="delete_account.php" style="flex:1;display:flex;">
+        <form method="post" action="delete_account.php" style="flex:1;display:flex;flex-direction:column;gap:10px;">
             <input type="hidden" name="csrf_token" value="<?php echo csrfToken(); ?>">
+            <?php if (AUTH_MODE === 'local'): ?>
+            <input type="password" name="password" class="form-input" placeholder="输入登录密码以确认"
+                   required autocomplete="current-password">
+            <?php endif; ?>
             <button type="submit" class="btn btn-danger-solid" style="flex:1;">确认注销</button>
         </form>
     </div>

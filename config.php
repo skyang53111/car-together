@@ -73,6 +73,27 @@ date_default_timezone_set(TIMEZONE);
 ini_set('session.gc_maxlifetime', SESSION_LIFETIME);
 ini_set('session.cookie_lifetime', SESSION_LIFETIME);
 
+// 会话 cookie：禁止 JS 读取（防 XSS 偷 cookie）、跨站请求不带（防 CSRF），HTTPS 下加 Secure
+if (session_status() === PHP_SESSION_NONE) {
+    session_set_cookie_params([
+        'lifetime' => SESSION_LIFETIME,
+        'path'     => '/',
+        'httponly' => true,
+        'samesite' => 'Lax',
+        'secure'   => str_starts_with(SITE_URL, 'https'),
+    ]);
+}
+
+// 还没建 config.local.php 时给出可读提示，而不是 Undefined constant 致命错误
+if (!defined('DB_HOST') || !defined('DB_NAME') || !defined('DB_USER')) {
+    if (php_sapi_name() === 'cli') {
+        fwrite(STDERR, "缺少数据库配置：请先 cp config.local.example.php config.local.php 并填写 DB_* 常量。\n");
+        exit(1);
+    }
+    http_response_code(500);
+    die('站点尚未完成配置：请把 config.local.example.php 复制为 config.local.php，并填写数据库连接信息。');
+}
+
 // 数据库连接
 try {
     $dsn = "mysql:host=" . DB_HOST . ";port=" . DB_PORT . ";dbname=" . DB_NAME . ";charset=" . DB_CHARSET;

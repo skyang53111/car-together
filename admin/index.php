@@ -64,9 +64,13 @@ $trendRides = [];
 for ($i = 6; $i >= 0; $i--) {
     $date = date('Y-m-d', strtotime("-{$i} days"));
     $label = date('m-d', strtotime("-{$i} days"));
-    $cnt = (int)$pdo->query("SELECT COUNT(*) FROM users WHERE DATE(created_at) = '{$date}'")->fetchColumn();
+    $st = $pdo->prepare("SELECT COUNT(*) FROM users WHERE DATE(created_at) = ?");
+    $st->execute([$date]);
+    $cnt = (int)$st->fetchColumn();
     $trendUsers[] = ['date' => $label, 'count' => $cnt];
-    $cnt2 = (int)$pdo->query("SELECT COUNT(*) FROM rides WHERE DATE(created_at) = '{$date}'")->fetchColumn();
+    $st = $pdo->prepare("SELECT COUNT(*) FROM rides WHERE DATE(created_at) = ?");
+    $st->execute([$date]);
+    $cnt2 = (int)$st->fetchColumn();
     $trendRides[] = ['date' => $label, 'count' => $cnt2];
 }
 // 7天总计（用于显示趋势箭头）

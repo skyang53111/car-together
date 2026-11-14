@@ -49,13 +49,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && input('action') === 'reset') {
     }
 
     if (empty($email)) {
-        $error = '未找到该账号';
+        // 不区分「账号不存在」和「验证码错误」，避免被用来探测某个邮箱是否注册过
+        $error = '账号或验证码不正确';
     } elseif (strlen($password) < 8) {
         $error = '新密码至少8位';
     } elseif ($password !== $confirm) {
         $error = '两次密码不一致';
     } elseif (!preg_match('/^(?=.*[a-zA-Z])(?=.*\d)/', $password)) {
         $error = '密码须包含字母和数字';
+    } elseif (!checkRateLimit('reset_pwd', 10, 3600)) {
+        // 6 位验证码只有一百万种可能，不限次数就能被穷举
+        $error = '尝试次数过多，请1小时后再试';
     } elseif (!verifyCode($email, $code, 'reset')) {
         $error = '验证码错误或已过期';
     } else {

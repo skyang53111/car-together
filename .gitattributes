@@ -1,0 +1,25 @@
+# 统一换行符：仓库里一律用 LF，检出时也不做转换
+* text=auto eol=lf
+
+# 文本类
+*.php   text
+*.css   text
+*.js    text
+*.json  text
+*.md    text
+*.sql   text
+*.yml   text
+*.yaml  text
+*.svg   text
+
+# 二进制，不做任何换行或 diff 处理
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.webp  binary
+*.woff  binary
+*.woff2 binary
+*.ttf   binary
+*.zip   binary

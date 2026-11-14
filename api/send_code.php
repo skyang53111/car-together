@@ -56,6 +56,7 @@ switch ($type) {
 
     case 'reset':
         // 找回密码：email 参数可能是手机号或邮箱，需兼容
+        // 账号不存在时也回“已发送”，避免这个接口变成「查某邮箱是否注册过」的工具
         $queryEmail = $email;
         if (strpos($email, '@') === false) {
             // 手机号 → 查邮箱
@@ -63,7 +64,7 @@ switch ($type) {
             $stmt->execute([$email]);
             $u = $stmt->fetch();
             if (!$u) {
-                echo json_encode(['success' => false, 'message' => '未找到该账号，请检查输入'], JSON_UNESCAPED_UNICODE);
+                echo json_encode(['success' => true, 'message' => '如果该账号存在，验证码已发送，请查收邮件'], JSON_UNESCAPED_UNICODE);
                 exit;
             }
             $queryEmail = $u['email'];
@@ -71,7 +72,7 @@ switch ($type) {
             $stmt = $pdo->prepare("SELECT id FROM users WHERE email = ?");
             $stmt->execute([$queryEmail]);
             if (!$stmt->fetch()) {
-                echo json_encode(['success' => false, 'message' => '未找到该账号'], JSON_UNESCAPED_UNICODE);
+                echo json_encode(['success' => true, 'message' => '如果该账号存在，验证码已发送，请查收邮件'], JSON_UNESCAPED_UNICODE);
                 exit;
             }
         }

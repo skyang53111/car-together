@@ -52,11 +52,20 @@ function verifyToken(string $token): int {
 
 function getAuthUserId(): int {
     $authHeader = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
-    if (preg_match('/^Bearer\s+(.+)$/i', $authHeader, $m)) {
-        return verifyToken($m[1]);
+
+    // 部分 Apache / CGI 环境不会把 Authorization 透传到 $_SERVER，补一条取值路径
+    if ($authHeader === '' && function_exists('apache_request_headers')) {
+        foreach (apache_request_headers() as $k => $v) {
+            if (strcasecmp($k, 'Authorization') === 0) { $authHeader = $v; break; }
+        }
     }
-    $token = $_REQUEST['token'] ?? '';
-    if ($token) return verifyToken($token);
+
+    if (preg_match('/^Bearer\s+(.+)$/i', $authHeader, $m)) {
+        return verifyToken(trim($m[1]));
+    }
+
+    // 不再接受 ?token= 形式的凭据：URL 会进访问日志、Referer、浏览器历史，等同泄露。
+    // 客户端请统一放到请求头：Authorization: Bearer <token>
     return 0;
 }
 

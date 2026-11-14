@@ -2,9 +2,6 @@
 # 这个文件只存在于服务器（和你的本地备份），绝不提交到 git
 config.local.php
 
-# ===== 疑似垃圾 / 异常文件 =====
-poo.txt
-
 # ===== 系统与编辑器 =====
 .DS_Store
 Thumbs.db
