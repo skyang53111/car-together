@@ -1,0 +1,46 @@
+name: PHP 语法检查
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint:
+    name: php -l (PHP ${{ matrix.php }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.0', '8.1', '8.2']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          coverage: none
+
+      - name: 语法检查（全部 PHP 文件）
+        run: |
+          set -o pipefail
+          find . -path ./.git -prune -o -name '*.php' -print0 \
+            | xargs -0 -n1 -P4 php -l
+
+      - name: 检查敏感配置没被提交
+        run: |
+          if git ls-files --error-unmatch config.local.php >/dev/null 2>&1; then
+            echo "::error::config.local.php 不应该进入版本库"
+            exit 1
+          fi
+
+      - name: 检查 setup.sql 是否覆盖代码用到的表
+        run: |
+          missing=0
+          for t in users rides bookings notifications verification_codes rate_limits site_config user_tokens user_subscriptions wechat_tokens; do
+            if ! grep -q "CREATE TABLE \`$t\`" setup.sql; then
+              echo "::error::setup.sql 缺少表 $t"
+              missing=1
+            fi
+          done
+          exit $missing
